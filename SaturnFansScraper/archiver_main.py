@@ -13,10 +13,11 @@ import os
 from Queue import Queue
 # TODO: Get regular expression implementation that releases GIL.
 import re
-from urlparse import urljoin
+from urlparse import urljoin, urlsplit
 
 from reppy.cache import RobotsCache
 import requests
+from bs4 import BeautifulSoup
 
 archiver_logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class Archiver(object):
             archiver_logger.info('Adding worker {}.'.format(i+1))
             worker = ArchiverWorker(self.shutdown_event, self.user_agent, self.robot_parser, self.scraper_timer,
                                     self.pages_need_visiting, self.pages_visited, self.pages_visited_lock,
-                                    self.page_re_filters, self.pages_need_analysis_counter)
+                                    self.page_re_filters, self.pages_need_analysis_counter, self.archive_location)
             worker.daemon = True
             self.workers.append(worker)
         return success
@@ -200,7 +201,8 @@ class ScraperTimer(object):
 
 class ArchiverWorker(threading.Thread):
     def __init__(self, shutdown_event, user_agent, robot_parser, scraper_timer, pages_need_visiting,
-                 pages_visited, pages_visited_lock, page_filters, analysis_counter, *args, **kwargs):
+                 pages_visited, pages_visited_lock, page_filters, analysis_counter, archive_location,
+                 *args, **kwargs):
         self.shutdown_event = shutdown_event
         self.user_agent = user_agent
         self.robot_parser = robot_parser
@@ -210,6 +212,7 @@ class ArchiverWorker(threading.Thread):
         self.pages_visited_lock = pages_visited_lock
         self.page_filters = page_filters
         self.analysis_counter = analysis_counter
+        self.archive_location = archive_location
         threading.Thread.__init__(self, *args, **kwargs)
 
         self.session = requests.session()
@@ -227,7 +230,39 @@ class ArchiverWorker(threading.Thread):
                     self.scraper_timer.wait()
                     archiver_logger.info('Retrieving page {}.'.format(trial_page_url))
                     response = self.session.get(trial_page_url)
+                    if response.status_code == 200:
+                        split_url = urlsplit(response.url, 2)
+                        netloc = split_url.netloc
+                        asset_path = split_url.path[1:]
+                        new_file = os.path.join(self.archive_location, asset_path)
+                        new_file_dir, _ = os.path.split(new_file)
+                        if not os.path.isdir(new_file_dir):
+                            os.makedirs(new_file_dir)
+                        for link in self._get_new_links(response.text):
+                            self.pages_need_visiting.put(link)
+                            self.analysis_counter.increment()
+                        with open(new_file, 'w') as f:
+                            f.write(self._alter_links(response.content, netloc))
                     with self.pages_visited_lock:
                         self.pages_visited.append(trial_page_url)
                 self.analysis_counter.decrement()
                 self.pages_need_visiting.task_done()
+
+    def _alter_links(self, data, base_netloc):
+        return re.sub('http[s]?\:\/\/{netloc}'.format(netloc=re.escape(base_netloc)), self.archive_location, data)
+
+    def _get_new_links(self, page_content):
+        new_links = []
+        page_soup = BeautifulSoup(page_content)
+        candidate_links = page_soup.find_all('link', {'href': True}) + page_soup.find_all('a', {'href': True})
+        for link in candidate_links:
+            href = link.get('href')
+            if self._apply_filters(href):
+                new_links.append(href)
+        return new_links
+
+    def _apply_filters(self, link):
+        for page_filter in self.page_filters:
+            if page_filter.search(link):
+                return True
+        return False
