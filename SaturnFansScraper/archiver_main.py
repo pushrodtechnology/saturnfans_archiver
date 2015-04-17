@@ -15,6 +15,7 @@ if not archiver_logger.handlers:
 
 import threading
 import time
+import os
 
 from reppy.cache import RobotsCache
 import requests
@@ -30,10 +31,37 @@ class Archiver(object):
         self.robot_parser = RobotsCache()
         self.shutdown_event = threading.Event()
         self.scraper_timer = None
+        self.workers = []
 
     def setup(self):
         archiver_logger.info('Beginning Archiver setup.')
         success = True
+        archiver_logger.info('Checking archive location...')
+
+        # Setup archive location.
+        base_path, new_archive = os.path.split(self.archive_location)
+        if not os.path.exists(base_path) or not os.path.isdir(base_path):
+            success = False
+            archiver_logger.error('Base path {} does not exist or is not a directory! Aborting!')
+            return success
+        elif (os.path.exists(self.archive_location) and
+                (not os.path.isdir(self.archive_location) or os.listdir(self.archive_location))):
+            success = False
+            archiver_logger.error('Archive location {} is either a not a directory or is not empty! Aborting!'
+                                  ''.format(self.archive_location))
+            return success
+        elif not os.path.exists(self.archive_location):
+            archiver_logger.info('Creating archive directory {}.'.format(self.archive_location))
+            try:
+                os.mkdir(self.archive_location)
+            except OSError:
+                success = False
+                archiver_logger.exception('Faulted attempting to create archive directory! Aborting!')
+                return success
+        else:
+            archiver_logger.info('Empty archive directory {} exists. Proceeding...'.format(self.archive_location))
+
+        # Attempt to retrieve robots.txt information about target site.
         if not self.robot_parser.allowed(self.base_url, self.user_agent):
             success = False
             archiver_logger.error('Not allowed to scrape {}! Aborting!'.format(self.base_url))
@@ -41,6 +69,7 @@ class Archiver(object):
         else:
             archiver_logger.info('Successfully polled {} for robots.txt, can scrape.'.format(self.base_url))
 
+        # Get crawl delay and build scraper timer.
         delay_time = self.robot_parser.delay(self.base_url, self.user_agent)
         if delay_time:
             archiver_logger.info('Site crawl-delay: {} seconds.'.format(delay_time))
@@ -57,6 +86,7 @@ class Archiver(object):
         return True
 
     def teardown(self):
+        self.shutdown_event.set()
         return True
 
 

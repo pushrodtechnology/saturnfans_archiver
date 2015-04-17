@@ -33,9 +33,11 @@ try:
     if archiver.setup():
         archiver.run()
 except KeyboardInterrupt:
-    archiver.shutdown_event.set()
-
+    root_logger.warning('Keyboard interrupt received! Attempting to shutdown archiver.')
 except Exception as e:
+    root_logger.exception('Unexpected exception encountered trying to archive forums!')
     raise e
 finally:
+    root_logger.info('Beginning teardown!')
     archiver.teardown()
+    root_logger.info('Archiver finished!')
