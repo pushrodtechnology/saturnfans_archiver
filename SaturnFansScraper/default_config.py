@@ -7,3 +7,4 @@ class ScraperConfig(object):
     ARCHIVE_SUBURL = '/forums/archive/index.php/f-{forum_code}.html'  # Sub-url for accessing archive mode posts.
     USER_AGENT = 'Saturn Fans Scraper v0.0.1'
     ARCHIVE_LOCATION = '/tmp/saturn_fans'
+    DEFAULT_CRAWL_DELAY = 0.5
