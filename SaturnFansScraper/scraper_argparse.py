@@ -12,7 +12,7 @@ argument_parser = argparse.ArgumentParser(description='SaturnFansScraper Version
                                           prog='python -m SaturnFansScraper')
 argument_parser.add_argument('-url', '--base_url', type=str, nargs='?', default=ScraperConfig.BASE_URL,
                              help='Base of the site to scrape. Default: {}.'.format(ScraperConfig.BASE_URL))
-argument_parser.add_argument('-bl', '--backup_location', type=str, nargs='?', default=ScraperConfig.ARCHIVE_LOCATION,
+argument_parser.add_argument('-al', '--archive_location', type=str, nargs='?', default=ScraperConfig.ARCHIVE_LOCATION,
                              help='The location to build the Saturn Fans archive in. '
                                   'Default: {}.'.format(ScraperConfig.ARCHIVE_LOCATION))
 argument_parser.add_argument('forum_codes', type=int, nargs='*', default=ScraperConfig.FORUM_CODES,

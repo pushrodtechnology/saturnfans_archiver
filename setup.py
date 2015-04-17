@@ -7,4 +7,4 @@ setup(name='SaturnFans Scraper',
       author_email='robert.cope@pushrodtechnology.com',
       version='0.0.1',
       packages=['SaturnFansScraper'],
-      install_requires=['requests>=2.4.1'])
+      install_requires=['requests>=2.4.1', 'reppy', 'BeautifulSoup4'])
