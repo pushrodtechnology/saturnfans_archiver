@@ -27,7 +27,8 @@ if arguments.log_file:
     fh.setFormatter(formatter)
     root_logger.addHandler(fh)
 
-archiver = Archiver(arguments.base_url, arguments.forum_codes, arguments.archive_location,  ScraperConfig.USER_AGENT)
+archiver = Archiver(arguments.base_url, arguments.forum_codes, arguments.archive_location,  ScraperConfig.USER_AGENT,
+                    arguments.worker_count)
 
 try:
     if archiver.setup():

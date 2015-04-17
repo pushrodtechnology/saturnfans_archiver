@@ -13,4 +13,6 @@ class ScraperConfig(object):
     LOG_FILE = ''  # If not empty, save logs to a file somewhere.
     LOG_FILE_LOG_LEVEL = logging.INFO  # Default log level when logging to a file.
     # Logger format string
-    LOG_FORMAT_STR = '[%(asctime)s] -  %(levelname)s - %(message)s - (%(name)s : %(funcName)s : %(lineno)d)'
+    LOG_FORMAT_STR = '[%(asctime)s] -  %(levelname)s - %(message)s - (%(name)s : %(funcName)s : %(lineno)d : ' \
+                     'T%(thread)d)'
+    DEFAULT_WORKER_COUNT = 2

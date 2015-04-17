@@ -18,5 +18,8 @@ argument_parser.add_argument('-al', '--archive_location', type=str, nargs='?', d
 argument_parser.add_argument('-lf', '--log_file', type=str, nargs='?', default=ScraperConfig.LOG_FILE,
                              help='Location to save log files to. Default: {}.'
                                   ''.format(ScraperConfig.LOG_FILE or '<no log file>'))
+argument_parser.add_argument('-wc', '--worker_count', type=int, nargs='?', default=ScraperConfig.DEFAULT_WORKER_COUNT,
+                             help='Number of scraper workers to use. Default: {}.'
+                                  ''.format(ScraperConfig.DEFAULT_WORKER_COUNT))
 argument_parser.add_argument('forum_codes', type=int, nargs='*', default=ScraperConfig.FORUM_CODES,
                              help='The sub-forum numbers to scraper. Defaults: {}.'.format(ScraperConfig.FORUM_CODES))

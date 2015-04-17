@@ -7,12 +7,6 @@ except ImportError:
 
 import logging
 
-archiver_logger = logging.getLogger(__name__)
-if not archiver_logger.handlers:
-    ch = logging.StreamHandler()
-    archiver_logger.addHandler(ch)
-    archiver_logger.setLevel(logging.INFO)
-
 import threading
 import time
 import os
@@ -24,6 +18,8 @@ from urlparse import urljoin
 from reppy.cache import RobotsCache
 import requests
 
+archiver_logger = logging.getLogger(__name__)
+
 
 class Archiver(object):
     ARCHIVE_SUBFORUM_SUBURL_TEMPLATE = 'index.php/f-{forum_code}.html'
@@ -31,18 +27,25 @@ class Archiver(object):
     ARCHIVE_THREAD_SUBURL_RE = 'index.php/t-[^(.html)]*.html'
     ARCHIVE_CSS_RE = '[^(.css)]*.css'
 
-    def __init__(self, base_url, forum_codes, archive_location, user_agent):
+    def __init__(self, base_url, forum_codes, archive_location, user_agent, worker_count):
         archiver_logger.info('Archiver initialized.')
         self.base_url = base_url
+        self.archive_base_url = urljoin(self.base_url, ScraperConfig.ARCHIVE_SUBURL)
         self.forum_codes = forum_codes
         self.archive_location = archive_location
         self.user_agent = user_agent
         self.robot_parser = RobotsCache()
-        self.shutdown_event = threading.Event()
         self.scraper_timer = None
+        self.shutdown_event = threading.Event()
+        self.delay_time = 1
+
         self.workers = []
+        self.worker_count = worker_count
+
         self.pages_need_visiting = Queue()
-        self.pages_visited = Queue()
+        self.pages_need_analysis_counter = RachetingCounter()
+        self.pages_visited_lock = threading.Lock()
+        self.pages_visited = []
         self.page_re_filters = []
 
     def setup(self):
@@ -51,7 +54,7 @@ class Archiver(object):
 
         archiver_logger.info('Building page filters.')
         # Build regular expression filters for pages to attempt to crawl.
-        archive_base_url = urljoin(self.base_url, self.archive_location)
+        archive_base_url = self.archive_base_url
 
         # Build regular expression for sub-forums we're interested in.
         for forum_code in self.forum_codes:
@@ -68,8 +71,9 @@ class Archiver(object):
 
         archiver_logger.info('Adding seed pages.')
         for fc in self.forum_codes:
-            subforum_url = urljoin(self.archive_location, self.ARCHIVE_SUBFORUM_SUBURL_TEMPLATE.format(forum_code=fc))
+            subforum_url = urljoin(self.archive_base_url, self.ARCHIVE_SUBFORUM_SUBURL_TEMPLATE.format(forum_code=fc))
             self.pages_need_visiting.put(subforum_url)
+            self.pages_need_analysis_counter.increment()
             archiver_logger.info('Archiver seeded with page {}.'.format(subforum_url))
 
         archiver_logger.info('Checking archive location...')
@@ -115,14 +119,54 @@ class Archiver(object):
                                  ''.format(delay_time))
         archiver_logger.info('Intializng Scraper timer.')
         self.scraper_timer = ScraperTimer(delay_time)
+        self.delay_time = delay_time
+        if success:
+            archiver_logger.info('Archiver setup success!')
+        else:
+            archiver_logger.error('Archiver setup failure! Check logs!')
+        archiver_logger.info('Building workers...')
+        for i in xrange(self.worker_count):
+            archiver_logger.info('Adding worker {}.'.format(i+1))
+            worker = ArchiverWorker(self.shutdown_event, self.user_agent, self.robot_parser, self.scraper_timer,
+                                    self.pages_need_visiting, self.pages_visited, self.pages_visited_lock,
+                                    self.page_re_filters, self.pages_need_analysis_counter)
+            worker.daemon = True
+            self.workers.append(worker)
         return success
 
     def run(self):
+        archiver_logger.info('Starting workers...')
+        [worker.start() for worker in self.workers]
+        while not self.pages_need_analysis_counter.empty():
+            time.sleep(0.1)
+        archiver_logger.info('Finished archiving all possible pages. Shutting down.')
+        archiver_logger.info('Waiting for threads to finish up.')
+        self.shutdown_event.set()
+        self.scraper_timer.wait()
         return True
 
     def teardown(self):
-        self.shutdown_event.set()
+        if not self.shutdown_event.is_set():
+            self.shutdown_event.set()
         return True
+
+
+class RachetingCounter(object):
+    def __init__(self, value=0):
+        self.value = value
+        self.lock = threading.Lock()
+
+    def increment(self):
+        with self.lock:
+            self.value += 1
+
+    def decrement(self):
+        assert self.value > 0
+        with self.lock:
+            self.value -= 1
+
+    def empty(self):
+        return self.value == 0
 
 
 class ScraperTimer(object):
@@ -154,5 +198,36 @@ class ScraperTimer(object):
                 self.crawl_times.remove(stale_call)
 
 
-class ScraperWorker(threading.Thread):
-    pass
+class ArchiverWorker(threading.Thread):
+    def __init__(self, shutdown_event, user_agent, robot_parser, scraper_timer, pages_need_visiting,
+                 pages_visited, pages_visited_lock, page_filters, analysis_counter, *args, **kwargs):
+        self.shutdown_event = shutdown_event
+        self.user_agent = user_agent
+        self.robot_parser = robot_parser
+        self.scraper_timer = scraper_timer
+        self.pages_need_visiting = pages_need_visiting
+        self.pages_visited = pages_visited
+        self.pages_visited_lock = pages_visited_lock
+        self.page_filters = page_filters
+        self.analysis_counter = analysis_counter
+        threading.Thread.__init__(self, *args, **kwargs)
+
+        self.session = requests.session()
+        self.session.headers['User-Agent'] = self.user_agent
+
+    def run(self):
+        archiver_logger.info('Worker starting..')
+        while not self.shutdown_event.is_set():
+            if self.pages_need_visiting.empty():
+                time.sleep(0.1)
+            else:
+                trial_page_url = self.pages_need_visiting.get()
+                if (self.robot_parser.allowed(trial_page_url, self.user_agent) and
+                        trial_page_url not in self.pages_visited):
+                    self.scraper_timer.wait()
+                    archiver_logger.info('Retrieving page {}.'.format(trial_page_url))
+                    response = self.session.get(trial_page_url)
+                    with self.pages_visited_lock:
+                        self.pages_visited.append(trial_page_url)
+                self.analysis_counter.decrement()
+                self.pages_need_visiting.task_done()
