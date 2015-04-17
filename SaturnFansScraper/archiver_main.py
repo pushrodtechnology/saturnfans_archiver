@@ -28,6 +28,7 @@ class Archiver(object):
         self.archive_location = archive_location
         self.user_agent = user_agent
         self.robot_parser = RobotsCache()
+        self.shutdown_event = threading.Event()
         self.scraper_timer = None
 
     def setup(self):
