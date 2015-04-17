@@ -16,12 +16,21 @@ if not archiver_logger.handlers:
 import threading
 import time
 import os
+from Queue import Queue
+# TODO: Get regular expression implementation that releases GIL.
+import re
+from urlparse import urljoin
 
 from reppy.cache import RobotsCache
 import requests
 
 
 class Archiver(object):
+    ARCHIVE_SUBFORUM_SUBURL_TEMPLATE = 'index.php/f-{forum_code}.html'
+    ARCHIVE_SUBFORUM_SUBURL_RE_TEMPLATE = 'index.php/f-{forum_code}[^(.html)]?.html'
+    ARCHIVE_THREAD_SUBURL_RE = 'index.php/t-[^(.html)]*.html'
+    ARCHIVE_CSS_RE = '[^(.css)]*.css'
+
     def __init__(self, base_url, forum_codes, archive_location, user_agent):
         archiver_logger.info('Archiver initialized.')
         self.base_url = base_url
@@ -32,12 +41,38 @@ class Archiver(object):
         self.shutdown_event = threading.Event()
         self.scraper_timer = None
         self.workers = []
+        self.pages_need_visiting = Queue()
+        self.pages_visited = Queue()
+        self.page_re_filters = []
 
     def setup(self):
         archiver_logger.info('Beginning Archiver setup.')
         success = True
-        archiver_logger.info('Checking archive location...')
 
+        archiver_logger.info('Building page filters.')
+        # Build regular expression filters for pages to attempt to crawl.
+        archive_base_url = urljoin(self.base_url, self.archive_location)
+
+        # Build regular expression for sub-forums we're interested in.
+        for forum_code in self.forum_codes:
+            regex = urljoin(archive_base_url, self.ARCHIVE_SUBFORUM_SUBURL_RE_TEMPLATE.format(forum_code=forum_code))
+            self.page_re_filters.append(re.compile(regex))
+
+        # Add a regular expression for thread pages.
+        thread_regex = urljoin(archive_base_url, self.ARCHIVE_THREAD_SUBURL_RE)
+        self.page_re_filters.append(re.compile(thread_regex))
+
+        # Finally add a regular expression to grab the archive CSS.
+        css_regex = urljoin(archive_base_url, self.ARCHIVE_CSS_RE)
+        self.page_re_filters.append(re.compile(css_regex))
+
+        archiver_logger.info('Adding seed pages.')
+        for fc in self.forum_codes:
+            subforum_url = urljoin(self.archive_location, self.ARCHIVE_SUBFORUM_SUBURL_TEMPLATE.format(forum_code=fc))
+            self.pages_need_visiting.put(subforum_url)
+            archiver_logger.info('Archiver seeded with page {}.'.format(subforum_url))
+
+        archiver_logger.info('Checking archive location...')
         # Setup archive location.
         base_path, new_archive = os.path.split(self.archive_location)
         if not os.path.exists(base_path) or not os.path.isdir(base_path):
