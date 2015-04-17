@@ -1,1 +1,7 @@
-__author__ = 'rcope'
+__author__ = 'Robert Cope'
+
+import robotparser
+import requests
+
+class ScraperSpider(object):
+    pass
