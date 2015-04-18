@@ -249,7 +249,7 @@ class ArchiverWorker(threading.Thread):
                 self.pages_need_visiting.task_done()
 
     def _alter_links(self, data, base_netloc):
-        return re.sub('http[s]?\:\/\/{netloc}'.format(netloc=re.escape(base_netloc)), self.archive_location, data)
+        return re.sub('http[s]?://{netloc}'.format(netloc=re.escape(base_netloc)), self.archive_location, data)
 
     def _get_new_links(self, page_content):
         new_links = []
